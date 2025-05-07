@@ -198,16 +198,17 @@ class VideoSyncApp(QWidget):
     def _extract_audio(self, path: str):
         try:
             clip = VideoFileClip(path)
+            # get stereo (n×2) at 44.1 kHz
             arr = clip.audio.to_soundarray(fps=44100)
-            n = int(44100 / self.FPS)
-            rms = [np.sqrt((arr[i:i+n]**2).mean()) for i in range(0, len(arr), n)]
-            audio = np.array(rms)
-            if audio.max() > 0:
-                audio /= audio.max()
-            self.audio_int = audio
+            # average to mono
+            mono = arr.mean(axis=1)
+            sr = 44100
+            # time vector in seconds
+            self.audio_t = np.arange(len(mono)) / sr
+            self.audio_wave = mono
         except Exception as e:
             print("Audio extract error:", e)
-            self.audio_int = None
+            self.audio_t = self.audio_wave = None
 
     # --- Plot setup ---
     def _init_plot_data(self):
@@ -240,9 +241,11 @@ class VideoSyncApp(QWidget):
         self.ax_look.set_yticklabels(['NO LOOK','LOOK'])
 
         # Audio
-        self.line_audio, = self.ax_audio.plot([], [], lw=1)
-        self.ax_audio.set(xlabel='[s]', title='RMS audio amplitude',
-                          xlim=(0, self.t[-1]), ylim=(0,1))
+        self.line_audio, = self.ax_audio.plot([], [], lw=0.5)
+        self.ax_audio.set(xlabel='[s]', title='Audio Waveform',
+                          xlim=(0, self.audio_t[-1]), 
+                          ylim=(self.audio_wave.min(), self.audio_wave.max()))
+
 
         # compute and show stats right away
         self._compute_stats()
@@ -265,9 +268,12 @@ class VideoSyncApp(QWidget):
         # update each trace
         self.line_res.set_data(self.t[:idx+1], self.res[:idx+1])
         self.line_look.set_data(self.t[:idx+1], self.look_vec[:idx+1])
-        if self.audio_int is not None:
-            self.line_audio.set_data(self.t[:idx+1], self.audio_int[:idx+1])
-
+        if self.audio_t is not None:
+            # how many samples correspond to pos_ms
+            idx_samp = int(pos_ms/1000 * 44100)
+            idx_samp = min(idx_samp, len(self.audio_t)-1)
+            self.line_audio.set_data(self.audio_t[:idx_samp], 
+                                     self.audio_wave[:idx_samp])
         # stats don’t change per frame, so no need to recompute each time
 
         self.canvas.draw_idle()
